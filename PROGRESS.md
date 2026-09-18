@@ -37,9 +37,25 @@ P6 论文            ░░░░░░░░░░  未开始
 
 ---
 
+## 已完成（S1 合同测试全部跑完，2026-09-18）
+
+| # | 日期 | 内容 | 结果 |
+|---|---|---|---|
+| S1.0 | 2026-09-18 | 新 Core API 面 + 签名核对 | PASS，13 个类全部存在 |
+| S1.1 | 2026-09-18 | Falling Cube（含 T1/T1b/T5） | **ALL PASS**，确定性 max\|Δ\|=0 |
+| S1.2 | 2026-09-18 | 1–25 m/s 碰撞扫描（含 CCD 对照） | 记录；低速区间结论成立 |
+| S1.3 | 2026-09-18 | 生命周期（Restart / Existing Stage） | **ALL PASS** |
+| S1.4 | 2026-09-18 | 基线报告落盘 | `docs/P1.0-core-probe.md` |
+
+**关键结论**：新 Core 可独立支撑 P1.0。推进方式定为 **先 `app_utils.play()`，
+之后 `simulation_app.update()`（主）或 `SimulationManager.step(steps=N)`（需手动步进时）**。
+
+⚠️ **推进方式原计划是 (a) `step()`，实测必须改为 (b) 前置 `play()`** —— 单独 `step()` 不驱动物理。
+这一条已写入 `agents.md` §9.1，后续所有仿真代码都要遵守。
+
 ## 进行中
 
-无。（等待「下一步」的决策）
+无。（S1 已完成，等 S2–S7 放行）
 
 ---
 
@@ -47,12 +63,13 @@ P6 论文            ░░░░░░░░░░  未开始
 
 | 优先级 | 任务 | 前置 |
 |---|---|---|
-| 1 | **定 Isaac Sim core API 选型**（`A-001`：新 `experimental.*` vs 废弃中的 `core.api`） | 写代码前必须定 |
-| 2 | **P1.0 垂直切片**：一台差速 AGV + 最小场景 + ROS 2 `/cmd_vel` 闭环 | 决策 1 + 装 ROS 2 Jazzy |
-| 3 | P0.2–P0.4 DAOMAN 复现（可与 2 并行，纯 PyTorch） | 无 |
-| 4 | 精读 Nagai & Okumura 2026《From Gridworlds to Warehouses》 | 无 |
-| 5 | P1.2 场景搭建（室内仓库 + 室外堆场） | `A-006` 拍板 |
-| 6 | P1.5/P1.6 覆盖与通信模型、计算任务模型 | P1.0 |
+| 1 | 装 ROS 2 Jazzy（发行版确认：强烈倾向 Jazzy） | 用户确认 |
+| 2 | S2 差速 AGV 选型与导入 | 用户确认资产来源 |
+| 3 | S3 最小场景 / S4 差速控制（含 `DifferentialController` contract） | S2 |
+| 4 | S5 ROS 2 桥接 / S6 闭环验收 | ROS 2 装好 |
+| 5 | P0.2–P0.4 DAOMAN 复现（可并行，纯 PyTorch） | 无 |
+| 6 | 精读 Nagai & Okumura 2026《From Gridworlds to Warehouses》 | 无 |
+| 7 | P1.2 场景搭建（室内仓库 + 室外堆场） | `A-006` 拍板 |
 
 ---
 
@@ -61,20 +78,25 @@ P6 论文            ░░░░░░░░░░  未开始
 | # | 问题 | 状态 |
 |---|---|---|
 | 1 | 场景：室内仓库+室外堆场混合 vs 纯室外 | ⏳ 未答（`A-006`） |
-| 2 | Isaac Sim core API：新 vs 旧 | ⏳ 未答（`A-001`） |
-| 3 | ROS 2 Jazzy 还是 Humble | ⏳ 未答（倾向 Jazzy） |
+| 2 | ~~Isaac Sim core API：新 vs 旧~~ | ✅ **已定：新 core**（`A-001` 已 RESOLVED） |
+| 3 | ROS 2 Jazzy 还是 Humble | ⏳ 未答（**强烈倾向 Jazzy**，Humble 有静默丢数据风险） |
 | 4 | 目标机器人数（建议先 8 台） | ⏳ 未答 |
 | 5 | 是否要求实机验证 | ⏳ 未答 |
 | 6 | P5 进阶技术做几项 | ⏳ 未答 |
 | 7 | 目标 venue / deadline | ⏳ 未答 |
+| 8 | S1 产物归属：`/tmp` 还是进仓库（建议分层） | ⏳ 未答（`A-009`） |
 
 ---
 
 ## 最近 commit
 
 ```
-（尚未产生 commit —— 首次提交待用户确认）
+7579620  feat(project): 立项并建立「导航 × 计算卸载」研究仓库   → origin/main
+         2026-09-18 · 9 files, +2207
 ```
+
+**提醒**：以上为**初始化提交**，属一次性特例。此后的每个小任务按 `agents.md` 铁律二处理 ——
+由智能体 `git diff` 自查后**提醒你提交并等待确认**，不再代提交。
 
 ## 环境快照
 

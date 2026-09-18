@@ -232,7 +232,7 @@ DAOMAN 只有 `x ∈ {0,1,2}`（本地/BS/卫星）。我们扩展为**部分卸
 
 | 任务 | 说明 | 状态 |
 |---|---|---|
-| P1.0 | **垂直切片**：一台差速 AGV + 最小场景 + ROS 2 `/cmd_vel` 闭环。目标是最薄的一条线端到端跑通，暴露 Isaac Sim ↔ ROS 2 ↔ 低层控制的真实问题 | **建议最先做** |
+| P1.0 | **S1 新 Core 合同测试**（contract probe）：确认 `isaacsim.core.experimental.*` 能独立跑通 Stage → Physics → RigidBody → Collision → Step → StateQuery 的完整生命周期，并建立物理行为基线。细则见下方「P1.0 细则」 | **建议最先做** |
 | P1.1 | ~~安装 Isaac Sim 6.0 + ROS 2 Jazzy~~ → Isaac Sim 已就位；**ROS 2 Jazzy 仍需安装** | 部分完成 |
 | P1.2 | 用 Warehouse Creator 建场景：**室内仓库**（货架、窄通道、传送带）+ **室外堆场/园区**（卫星可见、地面站稀疏） | 待 `A-006` 拍板 |
 | P1.3 | 导入差速 AGV 的 URDF；配置刚体碰撞、摩擦、质量；验证 Gains Tuner |
@@ -245,7 +245,55 @@ DAOMAN 只有 `x ∈ {0,1,2}`（本地/BS/卫星）。我们扩展为**部分卸
 **交付物**：`src/envs/isaac/`、`src/ros2/`、场景 USD、`docs/P1-sim-setup.md`（含版本锁定与安装踩坑记录）
 **完成判据**：16 台 AGV 在 headless 下稳定运行 ≥1000 步，ROS 2 话题可被外部节点订阅，碰撞检测正确触发。
 
-> ⚠️ **硬件预警**：本机 RTX 4060 Laptop **8GB 显存 / 30GB 内存**，低于 Isaac Sim 官方建议（RTX 3070 起 / 32GB RAM）。**必须先做 P1.1 的可行性验证**，若失败立即切兜底方案（见 §9）。
+---
+
+#### P1.0 细则：S1 新 Core 合同测试
+
+> **定位修正（2026-09-18）**：S1 的目标**不是**"确认新旧两条 API 路径等价"，而是
+> **"确认新 Core API 能独立完成 P1.0 所需的最小仿真生命周期，并建立与旧探针的物理行为基线对照"**。
+> 差别在于：我们要的不是 `旧 API == 新 API`，而是 `新 Core 能否独立支撑 P1.0`。
+> 依据：NVIDIA《Core API to Core Experimental API》明确说明 6.0 并非所有旧 API 都有一对一替代
+> （部分行为变化来自底层 PhysX），且 `experimental.*` 本身被官方标记为实验性。
+
+**分层结构**（逐层 fail-fast，任一层不过即停，不进入下一层）：
+
+| 层 | 目的 | 关键动作 |
+|---|---|---|
+| **S1.0 API 面** | 不碰物理，只确认能 import 什么、类是否存在、签名如何 | 抽取各扩展自带的 `config/python_api.md` 作签名快照 |
+| **S1.1 Falling Cube** | 物理初始化与 stepping 能否工作 | `/World` + PhysicsScene + GroundPlane + Cube(mass 1kg, z=1m, v=0) → `apply_collision_apis` → `RigidPrim` → `step` → 读状态 |
+| **S1.2 Collision Sweep** | 高速碰撞行为基线（1/2/4/8/16/25 m/s） | 定位为**基线记录**，不作为硬性 API 验收 |
+| **S1.3 Lifecycle** | new stage / reset-restart / existing stage | 对应 NVIDIA 迁移验收清单的核心项 |
+| **S1.4 Baseline Report** | 契约快照 + 数值 + 偏差 | 交付 `docs/P1.0-core-probe.md` |
+
+**验收表**（T0–T9，✅ 为必须通过）：
+
+| 测试 | 目的 | 要求 |
+|---|---|---|
+| T0 | API 面确认 | ✅ |
+| T1 | **Step 有效性**：`get_simulation_time()` 严格递增 | ✅ |
+| T2 | Falling Cube：下落 / 碰地 / 不穿透 / 可读状态 / 无 NaN-Inf | ✅ |
+| T3 | Ground Collision 基础碰撞 | ✅ |
+| T4 | State Query：pose / velocity 读取 | ✅ |
+| T5 | **确定性复跑**：同参两遍轨迹一致 | ✅ |
+| T6 | Velocity Sweep 高速碰撞基线 | ✅（记录） |
+| T7 | Restart / reset 生命周期 | ✅ |
+| T8 | Existing Stage 打开后 step | ✅ |
+| T9 | 新旧数值对比 | **仅记录，不作为绝对阻塞** |
+
+**范围边界**（明确不做）：
+- **S1 不引入 IsaacLab** —— 避免把「Isaac Sim API 问题」和「IsaacLab 抽象问题」混在一起。IsaacLab 推迟到 P3 训练侧再引入，届时另立 contract（生命周期管理会换用 `PhysxManager` / `NewtonManager`）。
+- **S1 不引入 `DifferentialController`** —— 它属于 S4 的 robot-control contract。新实验版控制器接口为 `(v, ω) → [left, right] 轮速`，但提前引入只会增加变量。
+
+**产物归属**（分层，避免证据丢失）：
+- 探针**脚本**：S1.0–S1.3 期间放 `/tmp`，快速迭代，不进仓库
+- **S1.4 基线报告**：必须进仓库 → `docs/P1.0-core-probe.md`
+- 稳定后的探针脚本：提升到 `tools/probes/`，作回归测试永久保留
+
+理由：S1 的产出是后续所有仿真代码的**地基证据**。只留 `/tmp` 会导致下次会话必须重跑、且无法被论文引用；而 `agents.md` 铁律一要求任何结论可追溯到脚本与配置。
+
+---
+
+> ✅ **硬件预警已解除（2026-09-18）**：原"必须先做 P1.1 可行性验证"的要求已完成 —— headless 启动、GPU 物理、刚体碰撞全部通过（§10.2）。8GB 显存足以支撑 S1 规模。
 
 ---
 
@@ -427,8 +475,8 @@ headless 启动成功（首次含 warmup 约 85 s，之后约 6 s）；Warp 在 
 
 当前推荐顺序：
 
-1. **决定 Isaac Sim core API 选型`（ ``A-001` `）**——新 core（`isaacsim.core.experimental.*`）还是废弃中的旧 core。这是写代码前唯一还需要定的技术岔路，越晚改代价越大。
-2. **做 P1 的垂直切片**（不是"先把碰撞检测做好"）：一台差速 AGV + 最小场景 + ROS 2 `/cmd_vel` 闭环跑通。目的是端到端验证最薄的一条线，暴露真正未知的 Isaac Sim ↔ ROS 2 ↔ 低层控制环节。单独抠碰撞容易滚成没有研究产出的环境工程。
+1. ~~**决定 Isaac Sim core API 选型**~~ → **已定：新 core**（`A-001` 已解决）。直接进入 S1 合同测试。
+2. **执行 S1 合同测试**（P1.0 细则见 §P1）：第一刀切在 **S1.0 API 面 + S1.1 Falling Cube**，而不是直接跑速度扫描。这样一旦失败，能精确定位到底是 import、stage、physics 初始化、RigidPrim 还是 stepping 出问题。
 3. **并行推进 P0.2–P0.4**（DAOMAN 复现）：纯 PyTorch，不依赖 Isaac Sim，产出是必需的批判性基线与 H2 的证据。
 4. 精读 Nagai & Okumura 2026《From Gridworlds to Warehouses》—— P2 栅格桥接的核心参照。
 
@@ -442,11 +490,12 @@ headless 启动成功（首次含 warmup 约 85 s，之后约 6 s）；Warp 在 
    - 混合：更贴合老师说的"3D 仓库/工厂"，但室内卫星不可见，星地特色被削弱。
    - 纯室外：星地特色鲜明（LEO 可见窗口是天然的时变覆盖），但离"仓库"远。
    - *我的建议*：混合场景，室外堆场占约 1/3，室内仓库占 2/3 —— 这样"移动改变覆盖"的耦合最强（机器人穿过室内外边界时卸载选项真实切换）。
-2. **Isaac Sim core API 用新的还是旧的？**（`A-001`，写代码前必须定）
-   - 新 core `isaacsim.core.experimental.*`：官方方向、不会踩废弃坑，但文档与示例少、上手慢。
-   - 旧 core `isaacsim.core.api`：文档多、示例全（我这次探针用的就是它），但目录已在 `extsDeprecated/` 下。
-   - *我的建议*：**先用旧 core 跑通 P1 垂直切片**（降低首周风险），但在 P1 结束前做一次迁移评估，别等到 P2/P3 大量代码依赖后再改。
-3. **ROS 2 装 Jazzy 还是 Humble？** Ubuntu 24.04 官方支持 Jazzy，且 Isaac Sim 6.0 已支持 Jazzy —— 倾向 Jazzy，但需确认实验室是否有版本约束。
+2. ~~**Isaac Sim core API 用新的还是旧的？**~~ → **已决定：用新 core `isaacsim.core.experimental.*`**（2026-09-18）
+   - **决定性依据（本机实测）**：IsaacLab 3.0.0 源码中 24 个文件已用 `isaacsim.core.experimental`，仅 1 处提及旧 core 且是 CHANGELOG 历史引用；Isaac Sim 原生示例也是新 core 119 : 旧 core 70。**继续用旧 core 会立刻与依赖工具链错位。**
+   - 我此前"先用旧 core 降风险"的建议**已作废**。详见 `A-001`。
+3. **ROS 2 装 Jazzy 还是 Humble？** → **强烈倾向 Jazzy**（`A-004`）
+   - Ubuntu 24.04 官方支持 Jazzy；Isaac Sim 6.0.1 的 ROS 2 桥接内置 `jazzy + FastDDS 2.14.6`。
+   - ⚠️ **若本机装 Humble（FastDDS 2.6.11）**：在共享内存配置下会出现 discovery 正常（`ros2 topic list` 能看到话题）但**数据面静默全丢、且无任何报错**，极易被误诊为"OmniGraph 不 tick"。规避手段是在 ROS 2 侧挂 UDP-only 的 `FASTRTPS_DEFAULT_PROFILES_FILE`。
 4. **机器人数量的目标值？** 这直接决定 8GB 显存够不够。建议 P1 先定 8 台（安全），P4 再压测到 32/64 看崩在哪。
 5. **是否要求实机验证？** 若有真 AGV 可用，方案的价值会大幅提升（sim-to-real 是硬通货）；若没有，P4 的域随机化就是能力上限。
 6. **P5 的进阶技术要不要做？做几个？** 建议至少做第 1 项（STEAM 式增强），其余视进度。

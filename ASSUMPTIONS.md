@@ -9,22 +9,29 @@
 ---
 
 ## A-001 · Isaac Sim core API 选型
-**状态**：`OPEN` · **日期**：2026-09-18
+**状态**：`RESOLVED` → **采用新 core `isaacsim.core.experimental.*`** · **日期**：2026-09-18
 
-探针脚本使用 `isaacsim.core.api`（`World` / `DynamicCuboid`）。但实测发现该包落在 `extsDeprecated/isaacsim.core.api/`，**Isaac Sim 6.0 已将其标记为废弃**，官方主推新 core：
+原探针脚本使用 `isaacsim.core.api`（`World` / `DynamicCuboid`），但该包落在
+`/home/gsh/isaacsim/extsDeprecated/isaacsim.core.api/`。
 
-```
-/home/gsh/isaacsim/extsDeprecated/isaacsim.core.api/isaacsim/core/api/objects/cuboid.py
-```
+**决策依据（本机实测，非文献推断）**：
 
-**影响**：若长期使用旧 API，后续升级可能被迫迁移。
-**待办**：在 P1 开始前决定是否有必要一开始就切到 `isaacsim.core.experimental.*`。切新的代价是文档与示例少；不切的代价是后期迁移风险。
-**依据**：无文献 —— 本条目即 C 类假设，待验证。
+| 证据 | 数据 |
+|---|---|
+| IsaacLab 3.0.0 源码对两套 core 的引用 | 新 core **24** 个文件 vs 旧 core **1** 个（且是 CHANGELOG 里的历史引用） |
+| Isaac Sim 原生 `standalone_examples` | 新 core **119** vs 旧 core **70** |
+| NVIDIA 官方 | 《Core API to Core Experimental API》明确 `isaacsim.core.api/prims/utils` 在 6.0 已废弃 |
+
+**结论**：IsaacLab（我们 P3 训练侧要依赖的工具）**已完成迁移**。继续使用旧 core 会立刻与依赖工具链错位。
+我此前"先用旧 core 降低首周风险"的建议**作废**——那个判断建立在"新 core 生态不成熟"的假设上，实测不成立。
+
+**遗留提示**：`experimental.*` 被官方标记为实验性，签名不保证跨版本稳定。因此 S1.4 的签名快照是
+**本项目的 API 契约记录**，未来升级版本时用于差异比对。
 
 ---
 
 ## A-002 · 碰撞保真度扫描的实验条件
-**状态**：`OPEN` · **日期**：2026-09-18
+**状态**：`OPEN` · **日期**：2026-09-18 · **2026-09-18 补充：新 Core 复跑结果已出，见 `docs/P1.0-core-probe.md` §4**
 
 下表结论所用的测试条件由我自行设定，**不是引用自任何文献**，因此若写入论文必须完整交代这些条件：
 
@@ -34,12 +41,20 @@
 - 时间步 `dt = 1/60 s`（Isaac Sim 默认）
 - 判定：`min |x_a − x_b|` 是否小于半宽 0.1 m
 
-| 速度 m/s | 最小间距 m | 判定 |
+| 速度 m/s | 旧 Core 最小间距 m | 判定 |
 |---|---|---|
-| 1 / 2 / 4 / 8 / 16 | ≈ 0.200 | 正确碰撞 |
+| 1 / 2 / 4 | 0.200 / 0.236 / 0.199 | 正确碰撞 |
+| 8 / 16 | 0.217 / 0.206 | 正确碰撞 |
 | 25 | 0.037 | 穿透 |
 
-**注意**：真实 AGV 并非在无重力自由空间中运动。地面上存在摩擦与滚动阻力，实际碰撞行为需另行验证。此表只回答"离散碰撞检测在何速度下失效"，不能直接当作 AGV 碰撞行为的证据。
+**新 Core 复跑结果（2026-09-18，同条件）**：1/2/4 → 0.200（与旧一致）；8/16 → **0.133**（旧为 0.217/0.206，
+**存在偏差**，新 Core 重叠更深）；25 → 0.083（旧 0.037，均穿透）。详见 `docs/P1.0-core-probe.md` §4。
+
+**注意**：
+- 真实 AGV 并非在无重力自由空间中运动。地面上存在摩擦与滚动阻力，实际碰撞行为需另行验证。
+  此表只回答"离散碰撞检测在何速度下失效"，不能直接当作 AGV 碰撞行为的证据。
+- **新旧 Core 在 ≥8 m/s 处数值不一致**，印证了 NVIDIA 迁移指南"并非所有旧 API 都有一对一替代"的提醒。
+  论文引用时只能声明**低速区间（0.5–3 m/s，最小间距恒为 0.200）**的结论。
 
 ---
 
@@ -101,6 +116,35 @@ DAOMAN 原文未交代、复现时必须自行补全的项（来源：精读笔�
 **状态**：`RESOLVED`（可接受） · **日期**：2026-09-18
 
 本地目录为 `多智能体强化学习`，远程 GitHub 仓库为 `multi_agents_nav_offload`。二者无需一致，git 不要求同名，不影响推送与克隆。保持现状以避免改动你的个人目录结构。
+
+---
+
+## A-009 · S1 合同测试的分层与产物归属
+**状态**：`OPEN` · **日期**：2026-09-18
+
+由用户提出、我方补充后确定的 S1 结构。其中"探针脚本只放 `/tmp`、不进仓库"与"S1.2 扫描数据要留作基线"存在冲突；
+我方建议分层处理（脚本暂存 `/tmp`，**S1.4 基线报告进仓库** `docs/P1.0-core-probe.md`，稳定后脚本提升到 `tools/probes/`）。
+**依据**：部分有 NVIDIA 迁移验收清单支撑（new stage / existing stage 首次 step 必须验证），分层与归属为我方判断。
+**待办**：用户确认产物归属方案。
+
+---
+
+## A-010 · S1 阶段不引入 IsaacLab
+**状态**：`OPEN` → 倾向确认 · **日期**：2026-09-18
+
+S1 只用 Isaac Sim standalone + `isaacsim.core.experimental.*`，不引入 IsaacLab 包装层。
+理由：避免把「Isaac Sim API 问题」与「IsaacLab 抽象问题」混在一个实验里，保证失败可精确定位。
+**影响**：P3 若切到 IsaacLab 训练，生命周期管理方式会换成 `PhysxManager` / `NewtonManager`，需另立 contract。
+**待办**：P3 前重新评估。
+
+---
+
+## A-011 · S1 阶段不引入 DifferentialController
+**状态**：`OPEN` → 倾向确认 · **日期**：2026-09-18
+
+`DifferentialController`（`isaacsim.robot.experimental.wheeled_robots.controllers`）属于 S4 的 robot-control contract，不放进 S1。
+**依据**：接口已实测确认存在，签名为 `wheel_radius / wheel_base / max_linear_speed / max_angular_speed / max_wheel_speed`，
+`(v, ω) → [left, right]` 轮速。提前引入只会增加变量。
 
 ---
 

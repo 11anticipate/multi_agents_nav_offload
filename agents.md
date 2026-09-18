@@ -220,12 +220,52 @@
 
 | 坑 | 正确做法 |
 |---|---|
-| `omni.isaac.core` 不存在 | 用 `isaacsim.core.api` |
-| **`isaacsim.core.api` 已在 `extsDeprecated/` 下** | 6.0 主推 `isaacsim.core.experimental.*`。选型见 `ASSUMPTIONS.md` A-001，**写代码前先确认用哪套** |
-| `PhysicsMaterial` 没有 `.apply()` 方法 | 网上大量旧教程失效，不要照抄 |
+| `omni.isaac.core` 不存在 | 用 `isaacsim.core.api`（但见下条 —— 已废弃） |
+| **`isaacsim.core.api` / `.prims` / `.utils` 已在 `extsDeprecated/` 下** | **本项目已决定改用 `isaacsim.core.experimental.*`**（`A-001`，理由是 IsaacLab 3.0 已迁完）。`omni.isaac.*` 兼容层在 6.0 已移除 |
+| `PhysicsMaterial` 没有 `.apply()` 方法 | 旧教程写法失效；材质走 `isaacsim.core.experimental.materials` |
 | USD prim path 不能含 `.` | `/World/a_1.0` 非法 → 用整数索引 |
 | headless 首次启动慢 | 首次含 warmup 约 85 s，之后约 6 s；不要误判为卡死 |
 | 8GB 显存跑 GPU 物理可行 | 已实测通过（headless + 少机器人）。规模不确定时先压测，不要预先放弃 |
+
+**🔥 会让物理"静默不跑"的三条（2026-09-18 S1 实测，最常见且最难自查）**
+
+这三条不满足时，仿真**不报错、时间也推进**，但刚体一动不动 —— 极易被误判为"代码写对了只是重力小"：
+
+1. **必须 `app_utils.play()`**：`SimulationManager.step()` 单独调用不驱动物理。
+   正确顺序：`app_utils.play()` → `simulation_app.update()`（让物理初始化）→ 之后 `simulation_app.update()` 或 `SimulationManager.step(steps=N)` 都可用。
+2. **必须 `SimulationManager.set_default_physics_scene("/World/PhysicsScene")`**：否则默认场景为 `None`，
+   日志会报 `Invalid default physics scene path: None`。
+3. **必须 `PhysicsScene.set_gravity((0,0,-9.81))`**：`PhysicsScene` 默认重力**未 author**，`get_gravity()` 读出来是 `(nan, nan, nan)`。
+
+其他已实测项：
+
+| 事实 | 说明 |
+|---|---|
+| `step()` 的 `steps` keyword-only | `step(100)` 报错，须 `step(steps=100)` |
+| `RigidPrim` 返回 Warp 数组 | `get_world_poses()` / `get_velocities()` → `tuple[wp.array, wp.array]`，需 `.numpy()` |
+| `apply_collision_apis` 在 `GeomPrim` | **不在** `RigidPrim` 上 |
+| `set_local_poses` 用 `translations=` | `set_world_poses` 才用 `positions=` |
+| `SimulationManager` 无 play/pause/reset/stop | 时间线控制走 `isaacsim.core.experimental.utils.app` |
+| `stage` 无 `clear_stage` | 只有 `create_new_stage`；复用场景应原地复位 |
+| `Cube`/`GroundPlane` 自带 `positions`/`sizes`/`scales` | 无需再用 `XformPrim` 二次设位姿 |
+| 重建 stage 会让旧 prim 失效 | 报 `Accessed invalid expired prim`；改用 `set_world_poses` + `set_velocities` 原地复位 |
+| `enable_ccd(True)` 实测无效 | 对高速穿透无可观测影响（原因未追，可能需 PhysX scene 侧配置） |
+
+**已验证的新 core API 事实**（2026-09-18 从本机扩展源码与自带 `config/python_api.md` 抽取，非文档推测）：
+
+| 事实 | 细节 | 重要性 |
+|---|---|---|
+| **`SimulationManager.step()` 的 `steps` 是 keyword-only** | 签名 `step(*, steps=1, callback=None, update_fabric=False) -> None`。写 `step(100)` 会直接报错，必须 `step(steps=100)` | ⚠️ 高频踩坑 |
+| **`RigidPrim.get_world_poses()` / `get_velocities()` 返回 Warp 数组** | 返回 `tuple[wp.array, wp.array]`，**不是 numpy**。需要 `.numpy()` 转换才能喂给 numpy/ROS | ⚠️ 高频踩坑 |
+| `update_fabric=True` 有前提 | 签名注明：若 fabric 未启用而 `update_fabric=True` 会抛 `ValueError` | 中 |
+| `apply_collision_apis()` 存在 | 在 prims 模块，用于给几何体加碰撞属性 | 高（S1.1 要用） |
+| `SimulationEvent` 枚举存在 | 位于 `impl/simulation_event.py`，成员包括 `PHYSICS_READY` / `POST_RESET` / `PRE_PHYSICS_STEP` / `POST_PHYSICS_STEP` / `SIMULATION_STARTED` / `SIMULATION_PAUSED` / `TIMELINE_STOP` 等 14 项 | 中（S6 桥接排序会用到） |
+| 各扩展自带权威签名清单 | 每个扩展下都有 `config/python_api.md`，是比网上文档更可靠的本地契约来源 | 高 —— **查 API 先查它** |
+
+**已确认存在的类**（实测导出）：
+
+- `isaacsim.core.experimental.prims`：`Articulation` `GeomPrim` `RigidPrim` `XformPrim` `Prim` `DeformablePrim` `BufferDtype`
+- `isaacsim.core.experimental.objects`：`Cube` `Sphere` `Capsule` `Cone` `Cylinder` `GroundPlane` `Plane` `Mesh` `Camera` 及各类 `Light`
 
 ### 9.2 已安装的仿真资产（不要重复下载/安装）
 
@@ -248,3 +288,4 @@ ROS 2 桥接扩展已装；系统 ROS 2 未装
 | 2026-09-18 | 初版创建（用户要求：证据门槛 + 小任务即 commit + 文档同步） | 用户 |
 | 2026-09-18 | 新增 §4.3 与文首授权说明：文档更新无需逐次请示；放宽 §6 第 10 条；新增 §9.1 / §9.2 | 用户（"文档一定要更新不用问我"） |
 | 2026-09-18 | 仓库接入 `multi_agents_nav_offload`；§8 启动清单加入远程确认项 | 用户 |
+| 2026-09-18 | 核心 API 选型定案为新 core；§9.1 补入 6 项实测 API 事实与已确认类清单 | 用户（S1 重构提案）+ 本机实测 |
