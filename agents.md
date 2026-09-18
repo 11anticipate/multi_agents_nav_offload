@@ -267,6 +267,30 @@
 - `isaacsim.core.experimental.prims`：`Articulation` `GeomPrim` `RigidPrim` `XformPrim` `Prim` `DeformablePrim` `BufferDtype`
 - `isaacsim.core.experimental.objects`：`Cube` `Sphere` `Capsule` `Cone` `Cylinder` `GroundPlane` `Plane` `Mesh` `Camera` 及各类 `Light`
 
+**🔥 S4 差速控制实测坑（2026-09-18，详见 `docs/P1.3-s4-drive-contract.md`）**
+
+| 坑 | 正确做法 |
+|---|---|
+| **DOF 名 ≠ USD prim 路径** | `get_dof_indices()` / `wheel_dof_names=` 要用 **DOF 名**：`['left_wheel','right_wheel','rear_pivot','rear_axle']`。传 `'chassis_link/left_wheel'` 会 `AssertionError: Invalid DOF name` |
+| **link prim 不在 chassis 下** | `left_wheel_link` 的路径是 `/World/Carter/left_wheel_link`，**不是** `/World/Carter/chassis_link/left_wheel_link` |
+| **关节 prim 求世界变换会静默返回 identity** | `/World/Carter/chassis_link/left_wheel` 是**关节**不是 link。对它调 `ComputeLocalToWorldTransform` 会得到与 chassis 相同的值，`BBoxCache` 会返回 float 溢出（`-6.8e38`）。量几何必须用 **link** prim |
+| **NVIDIA 文档的 `wheel_base=0.54` 是错的** | 实测驱动轮间距 **0.628411 m**（`left_wheel_link.y=+0.314213`、`right_wheel_link.y=-0.314198`）。用 0.54 会让转向偏小 **13.85%**。轮半径 `0.24` 反而是对的 —— **资产参数必须逐个实测** |
+| **`set_dof_gains()` / `set_dof_max_efforts()` 对 Carter 无效** | 调用前后 USD 读回逐字相同。Carter 自带 `stiffness=0 / damping=17453.29 / maxForce=inf / type=force`，开箱即可用速度控制 —— 项目**依赖资产默认增益**（`A-015`） |
+| **ICR 标定的窗口必须够长** | 由两点反解旋转中心时，系数矩阵行列式 `= 4·sin²(Δψ/2)`。Δψ=42° 标出的 ICR 偏离真值 3.3 cm（恰好一个半径）。用 ≥86°（180 步）才稳定 |
+| **实际旋转中心不在驱动轴上** | 实测偏 **3.351 cm**（后被动轮侧向刮擦所致，`A-017`）。纯旋转时车体原点画半径 3.35 cm 的小圆 |
+
+**S4 可用的速度驱动配方**（新实验版，**不要**用 `extsDeprecated/` 里的旧版）：
+
+```python
+from isaacsim.robot.experimental.wheeled_robots.robots.wheeled_robot import WheeledRobot
+from isaacsim.robot.experimental.wheeled_robots.controllers.differential_controller import DifferentialController
+
+robot = WheeledRobot("/World/Carter", wheel_dof_names=["left_wheel", "right_wheel"],
+                     usd_path=CARTER_URL, positions=[0, 0, 0.3])      # usd_path 会自动引用到 stage
+ctrl = DifferentialController(wheel_radius=0.24, wheel_base=0.628411)  # 参数全 keyword-only
+robot.apply_wheel_actions(ctrl.forward(np.array([v, w])))              # [v,ω] → [左, 右] 角速度
+```
+
 ### 9.2 已安装的仿真资产（不要重复下载/安装）
 
 ```

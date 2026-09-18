@@ -471,14 +471,28 @@ headless 启动成功（首次含 warmup 约 85 s，之后约 6 s）；Warp 在 
 
 ## 11. 立即可做的下一步（已按实测结果改写）
 
-~~原第 1 步的可行性验证已于 2026-09-18 完成并通过~~ —— Isaac Sim 能跑、GPU 物理可用、刚体碰撞在目标速度区间内正确（§10.2）。**最大的未知已经排除。**
+~~第 1 步可行性验证~~、~~S1 合同测试~~、~~ROS 2 安装~~、~~AGV 选型~~、~~S4 差速控制合同~~
+**均已完成。** Isaac Sim 能跑、GPU 物理可用、刚体碰撞在目标速度区间内正确（§10.2）、
+S1 全部 PASS、ROS 2 Jazzy 已装、Carter v1 已锁定并可驱动
+（S4：直行误差 0.06%、原地转误差 2.58%、绕固定轴自转）。
 
-当前推荐顺序：
+**当前唯一推荐动作：S5 ROS 2 桥接** —— 建 `/cmd_vel` → `DifferentialController` 的 action graph，
+并把 `/odom` 与 `/tf` 发出来。见 `PROGRESS.md` §下一步。
 
-1. ~~**决定 Isaac Sim core API 选型**~~ → **已定：新 core**（`A-001` 已解决）。直接进入 S1 合同测试。
-2. **执行 S1 合同测试**（P1.0 细则见 §P1）：第一刀切在 **S1.0 API 面 + S1.1 Falling Cube**，而不是直接跑速度扫描。这样一旦失败，能精确定位到底是 import、stage、physics 初始化、RigidPrim 还是 stepping 出问题。
-3. **并行推进 P0.2–P0.4**（DAOMAN 复现）：纯 PyTorch，不依赖 Isaac Sim，产出是必需的批判性基线与 H2 的证据。
-4. 精读 Nagai & Okumura 2026《From Gridworlds to Warehouses》—— P2 栅格桥接的核心参照。
+### S5 的三个已知拦路点（不是盲区）
+1. **`DifferentialController` 是 Python 类，不是现成 OmniGraph 节点** ——
+   先查 `isaacsim.robot.wheeled_robots.nodes` 是否提供 C++ 差速节点，否则走 Python 脚本节点。
+   **这是第一件要查清的事。**
+2. **`wheel_base` 必须用实测值 `0.628411`**，文档值 `0.54` 会让转向偏小 13.85%（`A-012` 已更正）。
+3. **zsh 下 `source /opt/ros/jazzy/setup.bash` 会静默失败**，必须包在 `bash -c '...'` 里。
+
+### 与 S5 并行可推进（不依赖 Isaac Sim）
+1. **P0.2–P0.4 DAOMAN 复现** —— 纯 PyTorch，产出 H2 所需的批判性基线。
+2. 精读 Nagai & Okumura 2026《From Gridworlds to Warehouses》—— P2 栅格桥接的核心参照。
+3. S4 遗留实验：扫 ω ∈ {0.2, 0.5, 1.0} 确认原地转残余 2.58% 是否来自轮子滑移。
+
+**仍待拍板且会影响后续**（不阻塞 S5）：§12 决策 1（场景混合比例）、决策 4（机器人数目标值）。
+新增待拍板项：`A-006`、`A-009`，以及 `A-017`（P2 是否把 ICR 偏移写进运动学模型）。
 
 ---
 
